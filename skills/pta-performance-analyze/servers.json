@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "910b": {
+      "host": "192.168.9.xxx",
+      "user": "root",
+      "password": "********",
+      "remote_dir": "/home/your_path/pta_mem_issue",
+      "description": "Ascend 910B dev server"
+    },
+    "gpu": {
+      "host": "192.168.9.xxx",
+      "user": "root",
+      "password": "********",
+      "remote_dir": "/home/your_path/pta_mem_issue",
+      "description": "GPU dev server"
+    }
+  },
+  "default": "910b"
+}
