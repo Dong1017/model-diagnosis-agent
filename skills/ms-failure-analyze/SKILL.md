@@ -271,6 +271,7 @@ First, search [Failure Showcase reference](references/failure-showcase.md) for m
   solution: "[actionable steps]"
   last_seen: "[timestamp]"
   occurrences: [count]
+  issue_url: "[issue URL, comma-separated for multiple, or N/A if no issue]"
 ```
 
 ## Quick References
