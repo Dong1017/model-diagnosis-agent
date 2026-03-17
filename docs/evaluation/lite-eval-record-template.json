@@ -1,0 +1,10 @@
+{
+  "case_id": "string",
+  "skill_name": "ms-failure-analyze",
+  "diagnosis_correct": "no",
+  "evidence_ok": "no",
+  "actionable": "no",
+  "execution_result": "not_run",
+  "overall_skill_pass": "no",
+  "notes": ""
+}
