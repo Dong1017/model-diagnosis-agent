@@ -47,6 +47,7 @@ Set `overall_skill_pass=yes` only if all are true:
 - `diagnosis_correct` is `yes` or `partial`
 - `evidence_ok=yes`
 - `actionable=yes`
+- `execution_result=success`
 
 Else set `overall_skill_pass=no`.
 
