@@ -5,11 +5,6 @@ It also includes a compact Lite Eval path for quick skill smoke tests.
 
 ## Files
 
-- `task-success-definition.md`: layered success criteria and gating rules.
-- `root-cause-taxonomy.md`: closed-set taxonomy and scoring semantics.
-- `evidence-rubric.md`: evidence grading and pass constraints.
-- `evaluation-enums.md`: centralized enum source of truth.
-- `failure-eval-record-template.json`: storage-ready record schema example.
 - `lite-eval.md`: compact quick-test rubric (5 required fields).
 - `lite-eval-record-template.json`: minimal storage-ready template for Lite Eval.
 

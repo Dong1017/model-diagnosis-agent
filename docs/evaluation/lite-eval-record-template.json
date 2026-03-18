@@ -1,6 +1,6 @@
 {
   "case_id": "string",
-  "skill_name": "ms-failure-analyze",
+  "skill_name": "string",
   "diagnosis_correct": "no",
   "evidence_ok": "no",
   "actionable": "no",
