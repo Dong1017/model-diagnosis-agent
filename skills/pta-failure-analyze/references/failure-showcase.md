@@ -103,15 +103,71 @@ Historical torch_npu failures and their solutions. Format:
 - last_seen: "2026-03-09"
 - occurrences: 1
 
+### Per-Sample Gradient Threshold Issue
+- failure_info: "per_sample_grad, batch_size threshold, aclnnIm2col, gradient accuracy, expanded_weights,(Conv1d|GroupNorm|LayerNorm)"
+- observed_at: "call_for_per_sample_grads with batch_size>=32"
+- failure_type: "cann"
+- root_cause: "PyTorch's per-sample gradient computation (torch.nn.utils.call_for_per_sample_grads) uses THRESHOLD=32 in conv_utils.py to switch between group-based algorithm and unfold-based algorithm. When batch_size >= 32, unfold path triggers CANN's aclnnIm2col optimization which changes floating-point operation order compared to group-based algorithm, causing numerical differences between per-sample gradients and cumulative individual backward passes"
+- solution: "Workaround: use batch_size < 32 for per-sample gradient tests on NPU, or increase tolerance (atol=1e-2, rtol=1e-3). Long-term: address CANN aclnnIm2col numerical precision in optimization path, or use group-based algorithm unconditionally for per-sample gradients"
+- last_seen: "2026-03-11"
+- occurrences: 1
+
+### Test Framework CUDA Dependency
+- failure_info: "TypeError: '>=' not supported between 'NoneType' and 'tuple', SM53OrLater, torch.cuda.get_device_capability"
+- observed_at: "test_linalg.py:5731 (class TestLinalg test definition)"
+- failure_type: "scripts"
+- root_cause: "Test imports torch.testing._internal.common_cuda which contains CUDA-specific lazy evaluation (SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))) that fails when running on NPU because get_device_capability() returns None"
+- solution: "Skip common_cuda import for NPU tests, or add None check: torch.cuda.is_available() and torch.cuda.get_device_capability() is not None and ..."
+- last_seen: "2026-03-12"
+- occurrences: 1
+
+### _convert_weight_to_int4pack Not Implemented for NPU
+- failure_info: "Could not run 'aten::_convert_weight_to_int4pack' with arguments from 'CPU' backend, PrivateUse1 dispatcher not registered, int4 quantization, weight packing"
+- observed_at: "test_linalg.py test__int4_mm, test_mps.py test__int4_mm"
+- failure_type: "framework|cann"
+- root_cause: "Two issues: (1) Framework: torch_npu doesn't register aten::_convert_weight_to_int4pack dispatcher entry, only provides torch_npu.npu_convert_weight_to_int4pack in separate namespace. (2) CANN: No ACLNN kernel for weight packing equivalent to CUDA's matrix_to_m16n8k16_Bint4_layout; packing is done on CPU via npu_convert_weight_to_int4pack. Also: Input format differs (CUDA: uint8[N,K] with pre-packed int4; NPU: int32[K,N] unpacked), value range differs (CUDA: unsigned [0,15]; NPU: signed [-8,7])"
+- solution: "Short-term: Modify test to use NPU-specific flow with torch_npu.npu_convert_weight_to_int4pack and signed int4 quantization. Long-term: Add NPU dispatcher entry in native_functions.yaml and implement _convert_weight_to_int4pack_npu with format conversion"
+- last_seen: "2026-03-12"
+- occurrences: 1
+
+### AMP Custom Fwd Deprecation Warning Not Implemented on NPU
+- failure_info: "IndexError, list index out of range, custom_fwd deprecation warning, torch.cuda.amp.custom_fwd is deprecated"
+- observed_at: "test_cuda.py:test_autocast_custom_deprecated_warning"
+- failure_type: "scripts"
+- root_cause: "Test checks for CUDA-specific deprecation warning from torch.cuda.amp.custom_fwd. When adapted to NPU via adapt_testcases_to_npu.py (which converts torch.cuda.amp → torch.npu.amp), the test uses torch_npu.npu.amp.custom_fwd which does NOT emit a deprecation warning, causing the warning list to be empty and w[0] to raise IndexError"
+- solution: "Add test_cuda.py::TestCudaAutocast::test_autocast_custom_deprecated_warning to disabled tests list (.pytorch-disabled-tests.json) as it tests CUDA-specific behavior not applicable to NPU's amp implementation. NPU's custom_fwd in torch_npu/npu/amp/autocast_mode.py doesn't have deprecation mechanism for backward compatibility reasons"
+- last_seen: "2026-03-12"
+- occurrences: 1
+
+### CUDA Low-Level Test Framework APIs Missing on NPU
+- failure_info: "AttributeError, module 'torch._C' has no attribute '(_cuda_setStream|_cuda_setDevice|_cuda_sleep|_cuda_attach_out_of_memory_observer)', CudaNonDefaultStream, device_sleep, OOM observer"
+- observed_at: "test_cuda.py::TestCudaMallocAsync::test_notifies_oom, test_cuda.py::TestCuda (various tests)"
+- failure_type: "scripts|framework"
+- root_cause: "PyTorch test framework uses torch._C._cuda_* low-level APIs (_cuda_setStream, _cuda_setDevice, _cuda_sleep, _cuda_attach_out_of_memory_observer, etc.) which don't exist on NPU. These are CUDA C++ extension APIs. NPU has equivalents (_npu_setStream, _npu_setDevice, _npu_attach_out_of_memory_observer) but _cuda_sleep has no CANN equivalent (no device-side sleep kernel like CUDA's cudaSleep). Tests using CudaNonDefaultStream, device_sleep() or OOM observer attach trigger these missing APIs."
+- solution: "For script code: Change torch._C._cuda_attach_out_of_memory_observer(cb) to torch_npu._C._npu_attach_out_of_memory_observer(cb). For the case that the call chains of torch_npu and cuda are compatible and kernel is ready, the torch_npu framework may need revise. Otherwise, ask CANN team for kernel implementation help."
+- note: "CANN lacks device-side sleep kernel equivalent to CUDA's cudaSleep(). This is a feature gap, not a CANN error/bug. The no-op is sufficient since _sleep is only used for RPC/profiling timing delays."
+- last_seen: "2026-03-16"
+- occurrences: 2
+
+### functionalize_rng_ops CUDARngStateHelper Missing NPU Support
+- failure_info: "IndexError, tuple index out of range, functionalize_rng_ops, CUDARngStateHelper, default_generators"
+- observed_at: "test_functionalization_of_rng_ops.py::NegativeTest::test_on_cpu"
+- failure_type: "framework"
+- root_cause: "PyTorch's functorch/aot_autograd uses CUDARngStateHelper.get_torch_state_as_tuple() for RNG functionalization, which calls torch.cuda._get_rng_state_offset() that accesses torch.cuda.default_generators[idx]. On NPU (which uses CPU-only PyTorch build), the default_generators tuple is empty, causing IndexError."
+- solution: "Added patch_cuda_rng_state_helper() to torch_npu/utils/_inductor.py that overwrites CUDARngStateHelper.get_torch_state_as_tuple() to use torch_npu.npu.initial_seed() and torch_npu.npu._get_rng_state_offset() instead of CUDA equivalents when NPU is available. Both torch._prims_common.CUDARngStateHelper and torch._prims.rng_prims.CUDARngStateHelper instances are patched."
+- last_seen: "2026-03-17"
+- occurrences: 1
+
 ## Searchable Keywords
 
-- Memory: OOM, EL0004, 200000, 207018, memory exhausted
+- Memory: OOM, EL0004, 200000, 207018, memory exhausted, OOM observer, OutOfMemoryError, RuntimeError
 - Hardware: 107010, FORCE STOP, device task abort, ECC, link error
 - Distributed: HCCL, timeout, broadcast, all_reduce, 107020
-- Framework: 107002, context empty, stream not in context
-- Test: device detection, device mismatch, index_fill, bfloat16
-- Operator: custom ops, not supported, fallback, expanded_weights
+- Framework: 107002, context empty, stream not in context, dispatcher not registered, PrivateUse1, low-level API, CUDA API, _cuda_*, _npu_*, functionalize_rng_ops, default_generators
+- Test: device detection, device mismatch, index_fill, bfloat16, CUDA dependency, deprecation warning, CudaNonDefaultStream, device_sleep, OOM notifies_oom
+- Operator: custom ops, not supported, fallback, expanded_weights, aclnnIm2col, GroupNorm, int4pack, weight quantization
 - Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN
+- Accuracy: per_sample_grad, batch_threshold, numerical bias, gradient accuracy
 
 ## Adding New Failures
 
