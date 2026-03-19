@@ -94,6 +94,33 @@ Historical torch_npu failures and their solutions. Format:
 - last_seen: "2026-03-06"
 - occurrences: 15+
 
+### AI Core Overflow
+- failure_info: "207003, ACL_ERROR_RT_AICORE_OVER_FLOW, overflow, fp16, mixed precision, loss becomes NaN"
+- observed_at: ""
+- failure_type: "cann"
+- root_cause: "AI Core numeric overflow, usually triggered by fp16 or mixed-precision computation on large values or unstable gradients"
+- solution: "Stabilize the overflowing path first: cast sensitive ops to fp32, tune or reduce loss scaling, inspect gradients for inf/nan, then re-check any downstream timeout or communication failures"
+- last_seen: "2026-03-19"
+- occurrences: 2
+
+### Version Mismatch (torch_npu -> PyTorch -> CANN)
+- failure_info: "symbol not found, import fails after PyTorch upgrade, ABI mismatch, torch_npu version mismatch, CANN compatibility"
+- observed_at: ""
+- failure_type: "platform"
+- root_cause: "Installed torch_npu build is not compatible with the current PyTorch and/or CANN version after upgrade"
+- solution: "Reinstall or rebuild torch_npu for the exact PyTorch version in use, then verify the matching CANN compatibility matrix before retrying"
+- last_seen: "2026-03-19"
+- occurrences: 3
+
+### Stream Not in Current Context
+- failure_info: "stream not in current context, current stream, stream mismatch, aclrtSynchronizeStream, aclrtSetCurrentContext"
+- observed_at: ""
+- failure_type: "framework"
+- root_cause: "A stream created or recorded under one NPU context is later used from a different current context or device, so runtime synchronization happens against the wrong context"
+- solution: "Ensure the correct device/context is set before stream use, avoid cross-context stream reuse, and trace stream creation plus synchronization points in torch_npu or test code"
+- last_seen: "2026-03-19"
+- occurrences: 2
+
 ### Test Framework Device Detection
 - failure_info: "ERR01002, Expected all tensors to be on the same device, device mismatch, index_fill with incompatible types"
 - observed_at: "test_sort_and_select.py:test_stable_sort_against_numpy_npu_bfloat16"
