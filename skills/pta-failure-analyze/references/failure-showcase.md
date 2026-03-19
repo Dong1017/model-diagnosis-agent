@@ -103,15 +103,103 @@ Historical torch_npu failures and their solutions. Format:
 - last_seen: "2026-03-09"
 - occurrences: 1
 
+### Version Mismatch (torch_npu ↔ PyTorch ↔ CANN)
+- failure_info: "RuntimeError, undefined symbol, ImportError, version mismatch, ABI incompatible"
+- observed_at: "N/A - seed entry"
+- failure_type: "platform"
+- root_cause: "torch_npu compiled against different PyTorch version than installed, or CANN version incompatible with torch_npu"
+- solution: "Verify version matrix: check torch_npu release notes for supported PyTorch and CANN versions. Rebuild or reinstall matching versions."
+- last_seen: "2026-03-18"
+- occurrences: 5+
+
+### Operator Kernel Not Found (CANN Package Missing)
+- failure_info: "561003, 561112, kernel not found, operator binary package not installed, ACLNN_ERR_INNER_FIND_KERNEL_ERROR"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "CANN operator package (opp) not installed or incomplete, or ASCEND_OPP_PATH points to wrong directory"
+- solution: "1. Check OPP installed: ls /usr/local/Ascend/ascend-toolkit/latest/opp/ 2. Re-source env: source /usr/local/Ascend/ascend-toolkit/set_env.sh 3. Reinstall CANN toolkit if packages missing"
+- last_seen: "2026-03-18"
+- occurrences: 3+
+
+### Scalar-to-Tensor Device Mismatch
+- failure_info: "ERR01002, Expected all tensors to be on the same device, scalar tensor on CPU, NPU tensor expected"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "Python scalar or CPU scalar tensor passed to op-plugin function that expects NPU tensor. Op-plugin converts scalar via self_tensor_to_device() but some paths miss this."
+- solution: "Explicitly move scalar to NPU: `scalar_tensor.to('npu')`, or extract as Python scalar with `.item()` before passing"
+- last_seen: "2026-03-18"
+- occurrences: 5+
+
+### AI Core Overflow
+- failure_info: "207003, ACL_ERROR_RT_AICORE_OVER_FLOW, AI Core overflow, numerical overflow"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "Operator computation overflows AI Core register width, typically with fp16 inputs on large tensors or extreme values"
+- solution: "Cast inputs to fp32 before computation, or use loss scaling. Check operator dump data for overflow location."
+- last_seen: "2026-03-18"
+- occurrences: 3
+
+### Stream Not in Current Context
+- failure_info: "107003, ACL_ERROR_RT_STREAM_CONTEXT, stream not in current context"
+- observed_at: "N/A - seed entry"
+- failure_type: "framework"
+- root_cause: "NPU stream was created in one context but used in another, typically caused by multi-device operations or improper device switching"
+- solution: "Ensure torch.npu.set_device() is called before stream operations. Check that tensors and streams are on the same device."
+- last_seen: "2026-03-18"
+- occurrences: 2
+
+### HCCL Distributed Init Failure
+- failure_info: "ERR02xxx, HCCL init failed, init_process_group failed, EI0006, socket build timeout, EJ0001"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "HCCL communication initialization failed due to network issues, incorrect rank table, or firewall blocking ports"
+- solution: "1. Check network connectivity between nodes 2. Verify HCCL rank table configuration 3. Check firewall rules for HCCL ports 4. Set HCCL_CONNECT_TIMEOUT=300 for slow networks"
+- last_seen: "2026-03-18"
+- occurrences: 4
+
+### DO_COMPATIBILITY Fallback Precision Difference
+- failure_info: "numerical mismatch, precision difference, aclnn unavailable, DO_COMPATIBILITY fallback to acl_op"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "aclnn kernel not available on current CANN version, DO_COMPATIBILITY silently falls back to acl_op (OpCommand) path which may have different precision or behavior"
+- solution: "Upgrade CANN to version that supports the aclnn kernel. Check op_plugin_functions.yaml for version requirements. Or adjust test tolerances if precision difference is acceptable."
+- last_seen: "2026-03-18"
+- occurrences: 2
+
+### Format Conversion Error (ND/NZ/NCHW)
+- failure_info: "format mismatch, FormatHelper, IsOpInputBaseFormat, transdata failed, ACL format error"
+- observed_at: "N/A - seed entry"
+- failure_type: "cann"
+- root_cause: "Tensor stored in non-base format (e.g., NZ for matmul optimization) but operator requires base format (ND/NCHW). Format conversion (TransData) failed or was not triggered."
+- solution: "Use npu_format_cast to convert to base format before operation, or use apply_tensor_without_format for output allocation"
+- last_seen: "2026-03-18"
+- occurrences: 3
+
+### Operator Not Registered for privateuse1
+- failure_info: "NotImplementedError, Could not run, no kernel found, aten::xxx, privateuse1"
+- observed_at: "N/A - seed entry"
+- failure_type: "framework"
+- root_cause: "Operator not registered in npu_native_functions.yaml or not implemented in op-plugin for current PyTorch version"
+- solution: "1. Check npu_native_functions.yaml for operator registration 2. Check op_plugin_functions.yaml for version support 3. Use CPU fallback: tensor.cpu() → op → result.npu() 4. File feature request if operator should be supported"
+- last_seen: "2026-03-18"
+- occurrences: 10+
+
+## Observed Failures
+
+(Entries added from actual diagnosis sessions — include specific test case names and verified solutions)
+
 ## Searchable Keywords
 
-- Memory: OOM, EL0004, 200000, 207018, memory exhausted
-- Hardware: 107010, FORCE STOP, device task abort, ECC, link error
-- Distributed: HCCL, timeout, broadcast, all_reduce, 107020
-- Framework: 107002, context empty, stream not in context
-- Test: device detection, device mismatch, index_fill, bfloat16
-- Operator: custom ops, not supported, fallback, expanded_weights
-- Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN
+- Memory: OOM, EL0004, 200000, 207018, memory exhausted, FAIL_TO_ALLOCATE_MEMORY
+- Hardware: 107010, FORCE STOP, device task abort, ECC, link error, 507010, 507054, heartbeat
+- Distributed: HCCL, timeout, broadcast, all_reduce, 107020, EI0002, EI0006, EJ0001, init_process_group
+- Framework: 107002, 107003, context empty, stream not in context, ERR00xxx, ERR01xxx, ERR02xxx
+- Test: device detection, device mismatch, index_fill, bfloat16, DISABLED_TESTS_FILE, privateuse1
+- Operator: custom ops, not supported, fallback, expanded_weights, 561003, 561112, kernel not found, NotImplementedError
+- Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN, version mismatch, ImportError
+- Precision: numerical mismatch, overflow, 207003, DO_COMPATIBILITY, tolerance, per_sample_grad
+- Format: format mismatch, FormatHelper, ND, NZ, NCHW, transdata
+- Scalar: scalar tensor, device mismatch, self_tensor_to_device, item()
 
 ## Adding New Failures
 

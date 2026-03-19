@@ -1,0 +1,1250 @@
+{
+  "skill_name": "pta-failure-analyze",
+  "description": "Regression evals auto-generated from failure-showcase.md seed entries. Each eval tests whether the agent can correctly diagnose a known failure pattern.",
+  "schema_version": "1.0",
+  "evals": [
+    {
+      "id": "reg_001",
+      "source": {
+        "showcase_title": "InstanceNorm with Expanded Weights",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I'm running an InstanceNorm model on Ascend 910B and getting massive numerical mismatches in gradient computation. The test uses expanded_weights for per-sample gradients:\n\nAssertionError: 91% of elements mismatch\ngreatest relative difference: 353.9\n\nThe forward pass results look fine, but backward with per_sample_grad gives completely wrong gradients. Same test passes on CPU.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "我在 Ascend 910B 上跑 InstanceNorm 模型，梯度计算出现大量数值不匹配。测试用了 expanded_weights 做逐样本梯度：\n\nAssertionError: 91% 的元素不匹配\n最大相对差异: 353.9\n\n前向传播结果正常，但用 per_sample_grad 做反向传播时梯度完全不对。同样的测试在 CPU 上是通过的。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["InstanceNorm", "expanded_weights", "per_sample_grad", "mismatch"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["gradient", "per-sample", "InstanceNorm", "NPU implementation", "backward"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention NPU InstanceNorm gradient computation differences for per-sample gradients"
+        },
+        "layer4_solution": {
+          "keywords": ["tolerance", "atol", "rtol", "1e-2", "1e-3"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest adjusting test tolerances for NPU"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_002",
+      "source": {
+        "showcase_title": "Missing CANN Environment",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I just installed torch_npu but when I try to import it I get:\n\nImportError: libhccl.so: cannot open shared object file: No such file or directory\n\nI also see errors about libascendcl.so not found. I installed CANN toolkit but it doesn't seem to be picked up.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, Python 3.9, Ascend 910B",
+        "zh": "我刚装了 torch_npu，导入的时候报错了：\n\nImportError: libhccl.so: cannot open shared object file: No such file or directory\n\n还有 libascendcl.so 找不到的错误。我已经安装了 CANN toolkit，但似乎没有被识别到。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "unknown"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["libhccl.so", "libascendcl.so", "ImportError"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "scripts"
+        },
+        "layer3_root_cause": {
+          "keywords": ["CANN", "environment", "ASCEND_OPP_PATH", "ASCEND_AICPU_PATH", "not set", "not installed"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention CANN environment variables not set or CANN not properly sourced"
+        },
+        "layer4_solution": {
+          "keywords": ["source", "set_env.sh", "ascend-toolkit", "ASCEND"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include sourcing the CANN environment setup script"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "scripts",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_003",
+      "source": {
+        "showcase_title": "Out of Memory (OOM)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I'm training a 7B parameter model on Ascend 910B and getting memory errors:\n\nRuntimeError: Device memory exhausted.\n[ERROR] RUNTIME: memory allocation failed, error code: 207018\nEL0004: device memory not enough\n\nBatch size is 64. The model loads fine but crashes during the first forward pass.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "我在 Ascend 910B 上训练 7B 参数模型时报了内存错误：\n\nRuntimeError: Device memory exhausted.\n[ERROR] RUNTIME: memory allocation failed, error code: 207018\nEL0004: device memory not enough\n\nbatch size 是 64，模型能正常加载但在第一个前向传播就崩了。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["207018", "OOM", "out of memory", "EL0004", "memory exhausted"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform"
+        },
+        "layer3_root_cause": {
+          "keywords": ["HBM", "memory exhausted", "batch size", "device memory", "large tensor"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention device memory (HBM) exhaustion related to model size or batch size"
+        },
+        "layer4_solution": {
+          "keywords": ["batch size", "gradient checkpointing", "empty_cache", "reduce"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include at least one concrete memory reduction strategy"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_004",
+      "source": {
+        "showcase_title": "Context Empty Error",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "My torch_npu script crashes early with this error:\n\nRuntimeError: [ERROR] 107002: The context is empty, please call aclrtSetContext or aclrtSetDevice first.\n\nI'm trying to create a tensor on NPU:\n```python\nimport torch\nimport torch_npu\nx = torch.randn(3, 3).npu()\n```\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "我的 torch_npu 脚本一开始就报错了：\n\nRuntimeError: [ERROR] 107002: The context is empty, please call aclrtSetContext or aclrtSetDevice first.\n\n我只是想在 NPU 上创建一个张量：\n```python\nimport torch\nimport torch_npu\nx = torch.randn(3, 3).npu()\n```\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["107002", "context is empty", "aclrtSetContext", "aclrtSetDevice"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["context", "not initialized", "NPU", "device", "init"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention NPU context not being initialized before NPU API calls"
+        },
+        "layer4_solution": {
+          "keywords": ["set_device", "torch.npu", "init", "device"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should mention ensuring NPU device initialization before tensor operations"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_005",
+      "source": {
+        "showcase_title": "Device Task Abort (FORCE STOP)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Training crashed after running for about 30 minutes:\n\nRuntimeError: NPU function error: FORCE STOP\nretCode=107010, device task abort, reason=device task abort\nTask exception info:\n  task_type: AI_CORE\n  stream_id: 8\n  task_info: kernel_name=MatMul\n\nThe training was running a large transformer model. It worked fine yesterday but started failing today.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "训练跑了大约 30 分钟后崩了：\n\nRuntimeError: NPU function error: FORCE STOP\nretCode=107010, device task abort, reason=device task abort\nTask exception info:\n  task_type: AI_CORE\n  stream_id: 8\n  task_info: kernel_name=MatMul\n\n训练的是一个大的 transformer 模型。昨天还好好的，今天就报错了。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["107010", "FORCE STOP", "device task abort"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform"
+        },
+        "layer3_root_cause": {
+          "keywords": ["heartbeat", "hardware", "device", "NPU", "error", "hang"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention NPU hardware heartbeat lost or device hardware error"
+        },
+        "layer4_solution": {
+          "keywords": ["npu-smi", "device health", "reset", "hardware"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include hardware-level diagnosis steps like npu-smi"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_006",
+      "source": {
+        "showcase_title": "CANN Inner Error",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Running a custom operator on Ascend and getting a CANN inner error:\n\nRuntimeError: EZ9999: Inner Error!\n[CANN Inner Error] An internal error occurred.\n\nThe operator was working fine with CANN 7.0 but fails after upgrading to 8.0.RC3.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "在 Ascend 上跑一个自定义算子时报了 CANN 内部错误：\n\nRuntimeError: EZ9999: Inner Error!\n[CANN Inner Error] An internal error occurred.\n\n这个算子在 CANN 7.0 上是正常的，升级到 8.0.RC3 后就报错了。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["EZ9999", "CANN Inner Error", "Inner Error"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["CANN", "internal", "operator", "compatibility", "version"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention CANN internal error related to operator compatibility with CANN version"
+        },
+        "layer4_solution": {
+          "keywords": ["CANN logs", "/var/log/npu/slog", "update", "recompile", "version"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include checking CANN logs and considering version update or operator recompilation"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_007",
+      "source": {
+        "showcase_title": "HCCL Timeout",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Distributed training on 8 Ascend 910B cards hangs and then times out:\n\nRuntimeError: wait for compute device to finish failed, times out\nerror code: 107020\n\nThe training starts fine but after a few iterations one of the ranks hangs and eventually all ranks time out.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 8x Ascend 910B",
+        "zh": "8 张 Ascend 910B 上的分布式训练卡住后超时了：\n\nRuntimeError: wait for compute device to finish failed, times out\nerror code: 107020\n\n训练开始是正常的，跑了几个 iteration 后某个 rank 卡住了，最终所有 rank 都超时。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 8x Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["107020", "times out", "wait for compute device"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["HCCL", "timeout", "process", "termination", "network"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention HCCL operation timeout, possibly due to process termination or network issues"
+        },
+        "layer4_solution": {
+          "keywords": ["network", "HCCL", "connectivity", "process"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include checking network connectivity and HCCL configuration"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_008",
+      "source": {
+        "showcase_title": "Feature Not Supported",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Trying to use torch.linalg.solve on NPU but getting:\n\nRuntimeError: [ERROR] ERR00007: feature not supported\nerror code: 207000\nThe operator 'aten::linalg_solve' is not supported on NPU backend.\n\nIs there a workaround?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "在 NPU 上用 torch.linalg.solve 报错了：\n\nRuntimeError: [ERROR] ERR00007: feature not supported\nerror code: 207000\nThe operator 'aten::linalg_solve' is not supported on NPU backend.\n\n有没有什么替代方案？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["ERR00007", "207000", "feature not supported", "not supported"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["operator", "not implemented", "NPU", "torch_npu", "CANN"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention operator or feature not implemented for NPU in current version"
+        },
+        "layer4_solution": {
+          "keywords": ["CPU fallback", "upgrade", "compatibility", "version"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest version upgrade or CPU fallback as workaround"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_009",
+      "source": {
+        "showcase_title": "Test Framework Device Detection",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Running PyTorch test_sort_and_select.py adapted for NPU. The test test_stable_sort_against_numpy_npu_bfloat16 fails:\n\nRuntimeError: ERR01002: Expected all tensors to be on the same device, but found at least two devices\n\nThe error involves index_fill with incompatible types. The test passes on CUDA. Looks like a device detection issue in the test framework.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "在跑适配 NPU 的 PyTorch 测试 test_sort_and_select.py 时，test_stable_sort_against_numpy_npu_bfloat16 这个用例失败了：\n\nRuntimeError: ERR01002: Expected all tensors to be on the same device, but found at least two devices\n\n错误涉及 index_fill 的类型不兼容。这个测试在 CUDA 上是通过的，看起来是测试框架的设备检测有问题。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["ERR01002", "device mismatch", "same device", "index_fill"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "scripts"
+        },
+        "layer3_root_cause": {
+          "keywords": ["device_type", "cuda", "npu", "early return", "check", "test"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention test framework checking for 'cuda' instead of 'npu' in device type conditions"
+        },
+        "layer4_solution": {
+          "keywords": ["device_type", "cuda", "npu", "check", "update"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should suggest updating device type check from cuda to npu"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "scripts",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_010",
+      "source": {
+        "showcase_title": "Version Mismatch (torch_npu ↔ PyTorch ↔ CANN)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I installed torch_npu but when I import it, I get:\n\nImportError: /path/to/torch_npu/lib/libtorch_npu.so: undefined symbol: _ZN2at4_ops10zeros_like\n\nI built torch_npu from source against PyTorch 2.1.0 but my pip-installed PyTorch seems to be 2.0.1.\n\nEnvironment: PyTorch 2.0.1 (pip), torch_npu built from source, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "我装了 torch_npu 但导入时报错了：\n\nImportError: /path/to/torch_npu/lib/libtorch_npu.so: undefined symbol: _ZN2at4_ops10zeros_like\n\n我是基于 PyTorch 2.1.0 从源码编译的 torch_npu，但 pip 安装的 PyTorch 好像是 2.0.1。\n\n环境：PyTorch 2.0.1 (pip), torch_npu 源码编译, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.0.1",
+        "torch_npu_version": "source build",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["undefined symbol", "ImportError", "version mismatch", "ABI"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform"
+        },
+        "layer3_root_cause": {
+          "keywords": ["version", "PyTorch", "torch_npu", "compiled", "mismatch", "ABI"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention torch_npu compiled against a different PyTorch version than what is installed"
+        },
+        "layer4_solution": {
+          "keywords": ["version", "rebuild", "reinstall", "matching", "release notes"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should suggest verifying version compatibility and rebuilding or reinstalling matching versions"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_011",
+      "source": {
+        "showcase_title": "Operator Kernel Not Found (CANN Package Missing)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Calling a conv2d operation on NPU gives this error:\n\naclnnConv2dGetWorkspaceSize failed, error code: 561003\nAclnn kernel not found. The operator binary package may not be installed.\n\nI installed CANN toolkit but maybe something is missing?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B",
+        "zh": "在 NPU 上调 conv2d 报了这个错：\n\naclnnConv2dGetWorkspaceSize failed, error code: 561003\nAclnn kernel not found. The operator binary package may not be installed.\n\n我装了 CANN toolkit，是不是缺了什么？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["561003", "kernel not found", "operator binary package"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["CANN", "opp", "operator package", "not installed", "ASCEND_OPP_PATH"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention CANN operator package (opp) not installed or env path incorrect"
+        },
+        "layer4_solution": {
+          "keywords": ["opp", "set_env.sh", "ASCEND_OPP_PATH", "reinstall", "ls"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include checking OPP installation and re-sourcing CANN environment"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_012",
+      "source": {
+        "showcase_title": "Scalar-to-Tensor Device Mismatch",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Adding a scalar to an NPU tensor fails with:\n\nRuntimeError: ERR01002: Expected all tensors to be on the same device, but found at least two devices: npu:0 and cpu\n\nMy code:\n```python\nx = torch.randn(10, device='npu')\nalpha = torch.tensor(0.5)  # on CPU\ny = x + alpha\n```\n\nWhy doesn't this auto-transfer like CUDA does?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "给 NPU 张量加一个标量报错了：\n\nRuntimeError: ERR01002: Expected all tensors to be on the same device, but found at least two devices: npu:0 and cpu\n\n我的代码：\n```python\nx = torch.randn(10, device='npu')\nalpha = torch.tensor(0.5)  # 在 CPU 上\ny = x + alpha\n```\n\n为什么不能像 CUDA 那样自动传输？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["ERR01002", "same device", "npu:0", "cpu", "scalar"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["scalar", "CPU", "NPU", "device", "tensor", "op-plugin"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention CPU scalar tensor passed to op-plugin function expecting NPU tensor"
+        },
+        "layer4_solution": {
+          "keywords": [".to('npu')", ".npu()", ".item()", "move", "scalar"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest explicitly moving scalar to NPU or extracting as Python scalar"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_013",
+      "source": {
+        "showcase_title": "AI Core Overflow",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Getting numerical overflow errors during fp16 training on Ascend:\n\nRuntimeError: ACL_ERROR_RT_AICORE_OVER_FLOW\nerror code: 207003\nAI Core computation overflow detected.\n\nI'm training with mixed precision (fp16) and large batch size. The error occurs in the attention layer.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "在 Ascend 上做 fp16 训练时出现数值溢出错误：\n\nRuntimeError: ACL_ERROR_RT_AICORE_OVER_FLOW\nerror code: 207003\nAI Core computation overflow detected.\n\n我在用混合精度（fp16）和较大的 batch size 训练，错误发生在 attention 层。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["207003", "AI Core overflow", "AICORE_OVER_FLOW", "overflow"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["overflow", "fp16", "AI Core", "register", "precision"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention AI Core register overflow with fp16 or extreme values"
+        },
+        "layer4_solution": {
+          "keywords": ["fp32", "cast", "loss scaling", "dump"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest casting to fp32 or using loss scaling"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_014",
+      "source": {
+        "showcase_title": "Stream Not in Current Context",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Multi-device code on Ascend crashes with stream context error:\n\nRuntimeError: ACL_ERROR_RT_STREAM_CONTEXT\nerror code: 107003\nStream not in current context.\n\nI'm trying to use two NPU devices and copy tensors between them:\n```python\nwith torch.npu.device(0):\n    x = torch.randn(10, device='npu:0')\nwith torch.npu.device(1):\n    y = x.to('npu:1')  # crashes here\n```\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 2x Ascend 910B",
+        "zh": "Ascend 上多设备代码报了 stream context 错误：\n\nRuntimeError: ACL_ERROR_RT_STREAM_CONTEXT\nerror code: 107003\nStream not in current context.\n\n我在尝试使用两个 NPU 设备并在它们之间拷贝张量：\n```python\nwith torch.npu.device(0):\n    x = torch.randn(10, device='npu:0')\nwith torch.npu.device(1):\n    y = x.to('npu:1')  # 这里崩了\n```\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 2x Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["107003", "stream", "context", "STREAM_CONTEXT"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["stream", "context", "device", "multi-device", "switching"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention stream created in one context but used in another due to device switching"
+        },
+        "layer4_solution": {
+          "keywords": ["set_device", "torch.npu", "same device", "stream"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest ensuring proper device context before stream operations"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_015",
+      "source": {
+        "showcase_title": "HCCL Distributed Init Failure",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Can't initialize distributed training on Ascend. init_process_group hangs and then fails:\n\nRuntimeError: HCCL init failed\n[EI0006] socket build timeout after 120 seconds\nFailed to initialize process group\n\nI'm trying to launch on 2 nodes (8 cards each). Single-node training works fine.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 16x Ascend 910B (2 nodes)",
+        "zh": "Ascend 上的分布式训练初始化失败了。init_process_group 卡住然后报错：\n\nRuntimeError: HCCL init failed\n[EI0006] socket build timeout after 120 seconds\nFailed to initialize process group\n\n我在 2 台机器（每台 8 卡）上启动。单机训练没问题。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 16x Ascend 910B（2 节点）"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["HCCL", "init failed", "init_process_group", "EI0006", "socket", "timeout"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["HCCL", "network", "rank table", "firewall", "initialization"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention HCCL communication init failure due to network issues, rank table, or firewall"
+        },
+        "layer4_solution": {
+          "keywords": ["network", "connectivity", "rank table", "firewall", "HCCL_CONNECT_TIMEOUT"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include checking network connectivity, rank table config, and firewall rules"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_016",
+      "source": {
+        "showcase_title": "DO_COMPATIBILITY Fallback Precision Difference",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "My model gives slightly different numerical results on Ascend compared to GPU. The differences are small but consistent (relative diff ~1e-3). I noticed warnings in CANN logs about aclnn kernels being unavailable.\n\nSome operators seem to fall back to a different code path. For example, I see \"DO_COMPATIBILITY\" in the torch_npu source. Could this cause precision differences?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "我的模型在 Ascend 上的数值结果跟 GPU 上略有不同。差异不大但很稳定（相对差异约 1e-3）。我在 CANN 日志里看到有 aclnn kernel 不可用的警告。\n\n有些算子好像走了不同的代码路径。比如在 torch_npu 源码里看到 \"DO_COMPATIBILITY\"，这会导致精度差异吗？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["precision", "numerical", "DO_COMPATIBILITY", "mismatch", "aclnn"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["DO_COMPATIBILITY", "fallback", "acl_op", "aclnn", "precision"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention DO_COMPATIBILITY silently falling back to acl_op path with different precision"
+        },
+        "layer4_solution": {
+          "keywords": ["CANN", "upgrade", "op_plugin_functions.yaml", "tolerance"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest upgrading CANN version or adjusting tolerances"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_017",
+      "source": {
+        "showcase_title": "Format Conversion Error (ND/NZ/NCHW)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Getting a format error when running a custom model on Ascend:\n\nRuntimeError: format mismatch! Expected base format (ND/NCHW) but got NZ\nFormatHelper: IsOpInputBaseFormat check failed\nTransData conversion failed.\n\nThe error happens after a MatMul layer. I think the tensor format gets optimized for MatMul but the next layer can't handle it.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "在 Ascend 上跑自定义模型时报了格式错误：\n\nRuntimeError: format mismatch! Expected base format (ND/NCHW) but got NZ\nFormatHelper: IsOpInputBaseFormat check failed\nTransData conversion failed.\n\n错误发生在一个 MatMul 层之后。我觉得是张量格式被 MatMul 优化了但下一层处理不了。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["format mismatch", "FormatHelper", "IsOpInputBaseFormat", "transdata", "NZ"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "cann"
+        },
+        "layer3_root_cause": {
+          "keywords": ["format", "NZ", "base format", "ND", "NCHW", "TransData", "conversion"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention tensor in non-base format (NZ) but operator requires base format (ND/NCHW)"
+        },
+        "layer4_solution": {
+          "keywords": ["npu_format_cast", "base format", "apply_tensor_without_format"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest converting tensor to base format before operation"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "cann",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_018",
+      "source": {
+        "showcase_title": "Operator Not Registered for privateuse1",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Trying to use torch.searchsorted on NPU tensor but getting:\n\nNotImplementedError: Could not run 'aten::searchsorted.Tensor' with arguments from the 'PrivateUse1' backend. This could be because the operator doesn't exist for this backend.\n\nIs this operator supported on Ascend?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "在 NPU 张量上用 torch.searchsorted 报错了：\n\nNotImplementedError: Could not run 'aten::searchsorted.Tensor' with arguments from the 'PrivateUse1' backend. This could be because the operator doesn't exist for this backend.\n\n这个算子在 Ascend 上支持吗？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["NotImplementedError", "Could not run", "PrivateUse1", "searchsorted"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["operator", "not registered", "npu_native_functions", "op-plugin", "not implemented"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention operator not registered in torch_npu or not implemented in op-plugin"
+        },
+        "layer4_solution": {
+          "keywords": ["npu_native_functions", "op_plugin_functions", "CPU fallback", ".cpu()", ".npu()"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest checking registration files and using CPU fallback"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_019",
+      "source": {
+        "showcase_title": "Delayed Execution Warning",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I'm debugging an error on Ascend but the stack trace doesn't match where the error actually is. I keep seeing this warning:\n\nWARNING: Since the operator is called asynchronously, the stacktrace may be inaccurate.\n\nThe actual error is somewhere in my attention module but the traceback points to a completely different line. How can I get an accurate stack trace?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B",
+        "zh": "我在 Ascend 上调试一个错误，但栈追踪和实际出错的地方对不上。一直看到这个警告：\n\nWARNING: Since the operator is called asynchronously, the stacktrace may be inaccurate.\n\n实际错误在我的 attention 模块里，但 traceback 指向了完全不同的位置。怎么才能拿到准确的栈追踪？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["asynchronously", "stacktrace", "inaccurate"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["asynchronous", "execution", "stack trace", "launch site", "NPU"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention NPU's asynchronous execution causing stack traces to show launch site not error site"
+        },
+        "layer4_solution": {
+          "keywords": ["ASCEND_LAUNCH_BLOCKING", "synchronous", "CANN logs"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest using ASCEND_LAUNCH_BLOCKING=1 for synchronous mode or checking CANN logs"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L1",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_020",
+      "source": {
+        "showcase_title": "Out of Memory (OOM)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Training a large model on Ascend 910B, it loads fine but crashes partway through the first epoch. The GPU memory tool shows the device memory was gradually increasing. Eventually the process just dies without a clear error — just a segfault.\n\nI'm using a batch size of 128 with a 13B model. No error code visible in the Python traceback, just \"Killed\" or segmentation fault.\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B",
+        "zh": "在 Ascend 910B 上训练大模型，加载没问题但跑第一个 epoch 就崩了。内存监控显示设备内存在逐渐增加，最后进程直接挂了，没有明确的错误信息——只有 segfault。\n\n我用的 batch size 128，13B 的模型。Python traceback 里看不到错误码，只有 \"Killed\" 或者 segmentation fault。\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["memory", "OOM", "batch size", "segfault", "Killed"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform"
+        },
+        "layer3_root_cause": {
+          "keywords": ["memory", "exhausted", "HBM", "batch size", "OOM"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should identify memory exhaustion even without explicit error codes"
+        },
+        "layer4_solution": {
+          "keywords": ["batch size", "gradient checkpointing", "npu-smi", "empty_cache", "reduce"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include memory diagnosis and reduction strategies"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L2",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_021",
+      "source": {
+        "showcase_title": "Device Task Abort (FORCE STOP)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "Training a large transformer model on Ascend, it ran fine for about 2000 steps yesterday. Today it hangs after ~500 steps — the process doesn't crash but stops making progress. After a long wait I see something about a task being aborted.\n\nThe machine hasn't changed. Same code, same data. Any ideas what could cause intermittent hangs like this?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B",
+        "zh": "在 Ascend 上训练一个大的 transformer 模型，昨天跑了约 2000 步没问题。今天跑到约 500 步就卡住了——进程没崩但不再前进。等了很久后看到有 task 被中止的信息。\n\n机器没有任何变化，同样的代码和数据。什么原因会导致这种间歇性的卡顿？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["hang", "task abort", "heartbeat", "FORCE STOP", "107010"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform"
+        },
+        "layer3_root_cause": {
+          "keywords": ["heartbeat", "hardware", "device", "NPU", "intermittent"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should consider device heartbeat lost or hardware intermittent issue"
+        },
+        "layer4_solution": {
+          "keywords": ["npu-smi", "health", "logs", "device"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should include device health check and hardware diagnosis"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L2",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_022",
+      "source": {
+        "showcase_title": "Version Mismatch (torch_npu ↔ PyTorch ↔ CANN)",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I upgraded PyTorch from 2.0 to 2.1 on my Ascend server and now torch_npu won't load. The import just fails with a cryptic C++ error — something about symbols not being found. I didn't change anything else.\n\nDo I need to reinstall torch_npu too? I thought it was version-independent.\n\nEnvironment: PyTorch 2.1.0 (newly upgraded), torch_npu (installed before upgrade), Ascend 910B",
+        "zh": "我把 Ascend 服务器上的 PyTorch 从 2.0 升级到了 2.1，结果 torch_npu 加载不了了。导入时报了一个看不懂的 C++ 错误——好像说找不到什么 symbol。我没改别的东西。\n\n我需要重装 torch_npu 吗？我以为它是不依赖版本的。\n\n环境：PyTorch 2.1.0（刚升级），torch_npu（升级前安装的），Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "unknown",
+        "backend": "ascend",
+        "cann_version": "unknown"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["import", "symbol", "version", "upgrade", "fail"],
+          "error_keywords_match": "any_2",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "platform",
+          "failure_type_aliases": ["framework", "version", "compatibility"]
+        },
+        "layer3_root_cause": {
+          "keywords": ["version", "mismatch", "PyTorch", "torch_npu", "compiled", "ABI"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should identify version mismatch between torch_npu and upgraded PyTorch"
+        },
+        "layer4_solution": {
+          "keywords": ["reinstall", "rebuild", "matching", "version", "release"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Solution should suggest reinstalling torch_npu matching the new PyTorch version"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L2",
+        "failure_type": "platform",
+        "created_at": "2026-03-18"
+      }
+    },
+    {
+      "id": "reg_023",
+      "source": {
+        "showcase_title": "Operator Not Registered for privateuse1",
+        "entry_type": "seed"
+      },
+      "prompt": {
+        "en": "I'm porting a HuggingFace model to Ascend and some layers just don't work. The model loads and runs partially, but certain operations silently fail or throw errors about operations not being available.\n\nFor example, one custom layer uses a specialized scatter operation that works on CUDA but throws an error on NPU. The error message is confusing — mentions something about PrivateUse1 backend.\n\nIs there a way to know which operators are supported? Or a way to make unsupported ones work?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B",
+        "zh": "我在把一个 HuggingFace 模型迁移到 Ascend 上，有些层跑不了。模型能加载也能部分运行，但某些操作会报错说操作不可用。\n\n比如有个自定义层用了一个特殊的 scatter 操作，在 CUDA 上正常但在 NPU 上报错。错误信息很莫名其妙——提到什么 PrivateUse1 backend。\n\n有没有办法知道哪些算子是支持的？不支持的算子有没有什么办法让它跑起来？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Ascend 910B"
+      },
+      "environment": {
+        "pytorch_version": "2.1.0",
+        "torch_npu_version": "2.1.0",
+        "backend": "ascend",
+        "cann_version": "8.0.RC3"
+      },
+      "assertions": {
+        "layer1_identification": {
+          "error_keywords": ["PrivateUse1", "not available", "not supported", "operator"],
+          "error_keywords_match": "any",
+          "backend_expected": "ascend"
+        },
+        "layer2_classification": {
+          "failure_type_expected": "framework"
+        },
+        "layer3_root_cause": {
+          "keywords": ["operator", "not registered", "not implemented", "op-plugin", "npu_native_functions"],
+          "keywords_match_min": 2,
+          "semantic_rubric": "Root cause should mention operators not being registered or implemented for the NPU backend"
+        },
+        "layer4_solution": {
+          "keywords": ["CPU fallback", ".cpu()", "npu_native_functions", "op_plugin_functions", "feature request"],
+          "keywords_match_min": 1,
+          "semantic_rubric": "Solution should suggest checking operator support list and using CPU fallback"
+        },
+        "layer5_process": {
+          "showcase_referenced": true,
+          "user_validation_asked": true
+        }
+      },
+      "scoring": {
+        "layer1_weight": 0.20,
+        "layer2_weight": 0.15,
+        "layer3_weight": 0.30,
+        "layer4_weight": 0.25,
+        "layer5_weight": 0.10,
+        "pass_threshold": 0.70
+      },
+      "metadata": {
+        "difficulty": "L2",
+        "failure_type": "framework",
+        "created_at": "2026-03-18"
+      }
+    }
+  ]
+}

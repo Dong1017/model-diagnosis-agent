@@ -1,0 +1,51 @@
+{
+  "skill_name": "pta-failure-analyze",
+  "description": "Capability evals for pta-failure-analyze. Tests the agent's ability to handle novel, cross-layer, multi-turn, and ambiguous diagnostic scenarios beyond known failure patterns.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": {
+        "en": "I'm running training on Ascend 910B and it crashed after a few steps. Here's the log:\n\nRuntimeError: NPU function error: FORCE STOP\nretCode=107010, device task abort\nTask exception info:\n  task_type: AI_CORE\n  stream_id: 12\n  task_info: kernel_name=MatMul\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9. It works fine with a small model but fails when I switch to a 13B model.",
+        "zh": "我在 Ascend 910B 上训练模型，跑了几步就崩了。日志如下：\n\nRuntimeError: NPU function error: FORCE STOP\nretCode=107010, device task abort\nTask exception info:\n  task_type: AI_CORE\n  stream_id: 12\n  task_info: kernel_name=MatMul\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.9。小模型没问题，换成 13B 大模型就报错了。"
+      },
+      "expected_output": "Should: (1) recognize 107010 as heartbeat lost / device task abort from Quick Route -> Platform level; (2) check failure-showcase for matching 107010 entry; (3) suggest hardware-level diagnosis: npu-smi info, check device health, check CANN logs in /var/log/npu/slog/; (4) note that large model vs small model difference suggests possible HBM pressure or device resource limits — cross-reference with OOM patterns; (5) ask user to verify fix before writing to showcase",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": {
+        "en": "I'm adapting a new aclnn operator for op-plugin. I wrote the OpAPI implementation in XxxKernelNpuOpApi.cpp and registered it in op_plugin_functions.yaml, but when I call it from Python I get:\n\nRuntimeError: aclnnXxxGetWorkspaceSize returned error code 561003\nKernel not found.\n\nThe operator works fine when I call the CANN C API directly. What's wrong with my op-plugin integration?\n\nEnvironment: PyTorch 2.1.0, torch_npu dev branch, CANN 8.0.RC3, Ascend 910B.",
+        "zh": "我正在为 op-plugin 适配一个新的 aclnn 算子。在 XxxKernelNpuOpApi.cpp 中写了 OpAPI 实现，也在 op_plugin_functions.yaml 注册了，但从 Python 调用时报错：\n\nRuntimeError: aclnnXxxGetWorkspaceSize returned error code 561003\nKernel not found.\n\n直接调 CANN C API 是正常的，op-plugin 集成这边哪里出了问题？\n\n环境：PyTorch 2.1.0, torch_npu dev 分支, CANN 8.0.RC3, Ascend 910B。"
+      },
+      "expected_output": "Should: (1) identify 561003 as CANN kernel not found -> Quick Route to CANN level; (2) check failure-showcase for '561003, kernel not found' match; (3) investigate op-plugin adaptation flow: check op_plugin_functions.yaml for correct function signature, verify aclnn two-phase interface (GetWorkspaceSize -> Execute) usage, check ASCEND_OPP_PATH; (4) reference cann-api-reference.md for ACLNN adaptation patterns; (5) suggest checking operator binary installation and CANN version compatibility; (6) provide structured diagnosis steps; (7) wait for user confirmation",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": {
+        "en": "torch_npu threw an error, can you take a look?\n\nRuntimeError: Expected all tensors to be on the same device",
+        "zh": "torch_npu 报了个错，帮我看看？\n\nRuntimeError: Expected all tensors to be on the same device"
+      },
+      "expected_output": "Should: (1) trigger Stage 0 — ask for PyTorch version, torch_npu version, CANN version, code context, and full error message since the info is critically insufficient; (2) recognize as a device mismatch error (ERR01002 pattern) but note that multiple showcase entries match this pattern (Scalar-to-Tensor Device Mismatch, Test Framework Device Detection); (3) NOT immediately diagnose — the error is too generic without more context; (4) ask specifically what operation was being performed and what the full traceback is",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": {
+        "en": "I'm running distributed training with 8 Ascend 910B cards using DDP. Training starts fine but after about 1000 steps, the loss suddenly becomes NaN and then all ranks crash with different errors:\n\nRank 0: RuntimeError: ACL_ERROR_RT_AICORE_OVER_FLOW (207003)\nRank 1-7: RuntimeError: wait for compute device to finish failed, times out (107020)\n\nThe model uses mixed precision (fp16) training with gradient scaler. Before the crash, the loss was normal (~2.3). Any idea what's happening?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 8x Ascend 910B, single node.",
+        "zh": "我在用 8 张 Ascend 910B 跑 DDP 分布式训练。训练开始正常，但跑了约 1000 步后 loss 突然变成 NaN，然后所有 rank 报了不同的错：\n\nRank 0: RuntimeError: ACL_ERROR_RT_AICORE_OVER_FLOW (207003)\nRank 1-7: RuntimeError: wait for compute device to finish failed, times out (107020)\n\n模型用了混合精度（fp16）训练和 gradient scaler。崩溃前 loss 是正常的（~2.3）。这是怎么回事？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, 8x Ascend 910B，单机。"
+      },
+      "expected_output": "Should: (1) recognize this as a multi-layer failure — the primary error is 207003 (AI Core overflow) on rank 0, causing secondary 107020 (HCCL timeout) on other ranks; (2) check failure-showcase for both 207003 and 107020 entries; (3) diagnose root cause as fp16 numerical overflow in AI Core, causing rank 0 to crash, which then triggers HCCL timeout on remaining ranks waiting for collective; (4) suggest: fix the overflow first (cast critical ops to fp32, adjust loss scaler, check for inf/nan in gradients), the HCCL timeout will resolve once rank 0 stops crashing; (5) NOT treat the HCCL timeout as a separate network issue; (6) ask user to verify",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": {
+        "en": "I'm trying to run a model that works on CUDA and I want to port it to Ascend. The model uses several custom CUDA kernels. When I naively replace .cuda() with .npu(), some operations work but others fail. Here's a sample of errors I'm seeing (not all at once, different parts of the model):\n\n1. NotImplementedError: Could not run 'aten::_flash_attention_forward' with arguments from the 'PrivateUse1' backend\n2. RuntimeError: ERR00007: feature not supported (207000)\n3. Some ops produce slightly different numerical results\n\nI need a systematic approach to porting this model. Can you help me figure out a strategy?\n\nEnvironment: PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B.",
+        "zh": "我想把一个在 CUDA 上跑的模型迁移到 Ascend。模型用了一些自定义 CUDA kernel。我简单地把 .cuda() 换成 .npu() 后，有些算子能用但有些报错了。以下是我遇到的几种错误（不是同时出现的，模型不同部分会报不同的错）：\n\n1. NotImplementedError: Could not run 'aten::_flash_attention_forward' with arguments from the 'PrivateUse1' backend\n2. RuntimeError: ERR00007: feature not supported (207000)\n3. 有些算子的数值结果跟 GPU 上略有不同\n\n我需要一个系统性的迁移方案，能帮我分析一下吗？\n\n环境：PyTorch 2.1.0, torch_npu 2.1.0, CANN 8.0.RC3, Python 3.10, Ascend 910B。"
+      },
+      "expected_output": "Should: (1) recognize this as a model porting scenario requiring structured approach, not a single failure; (2) reference multiple showcase entries: 'Operator Not Registered for privateuse1', 'Feature Not Supported', 'DO_COMPATIBILITY Fallback Precision Difference'; (3) provide systematic porting strategy: a) identify unsupported operators by running with ASCEND_LAUNCH_BLOCKING=1, b) for each unsupported op: check npu_native_functions.yaml and op_plugin_functions.yaml for alternatives, use CPU fallback as temporary workaround, c) for precision differences: compare with GPU results, adjust tolerances or use fp32 for sensitive layers; (4) specifically address flash attention: suggest using torch_npu's NPU-native attention implementation if available; (5) ask user to share the full model architecture for more targeted advice",
+      "files": []
+    }
+  ]
+}
