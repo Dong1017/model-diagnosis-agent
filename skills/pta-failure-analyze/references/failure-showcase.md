@@ -103,103 +103,71 @@ Historical torch_npu failures and their solutions. Format:
 - last_seen: "2026-03-09"
 - occurrences: 1
 
-### Version Mismatch (torch_npu ↔ PyTorch ↔ CANN)
-- failure_info: "RuntimeError, undefined symbol, ImportError, version mismatch, ABI incompatible"
-- observed_at: "N/A - seed entry"
-- failure_type: "platform"
-- root_cause: "torch_npu compiled against different PyTorch version than installed, or CANN version incompatible with torch_npu"
-- solution: "Verify version matrix: check torch_npu release notes for supported PyTorch and CANN versions. Rebuild or reinstall matching versions."
-- last_seen: "2026-03-18"
-- occurrences: 5+
-
-### Operator Kernel Not Found (CANN Package Missing)
-- failure_info: "561003, 561112, kernel not found, operator binary package not installed, ACLNN_ERR_INNER_FIND_KERNEL_ERROR"
-- observed_at: "N/A - seed entry"
+### Per-Sample Gradient Threshold Issue
+- failure_info: "per_sample_grad, batch_size threshold, aclnnIm2col, gradient accuracy, expanded_weights,(Conv1d|GroupNorm|LayerNorm)"
+- observed_at: "call_for_per_sample_grads with batch_size>=32"
 - failure_type: "cann"
-- root_cause: "CANN operator package (opp) not installed or incomplete, or ASCEND_OPP_PATH points to wrong directory"
-- solution: "1. Check OPP installed: ls /usr/local/Ascend/ascend-toolkit/latest/opp/ 2. Re-source env: source /usr/local/Ascend/ascend-toolkit/set_env.sh 3. Reinstall CANN toolkit if packages missing"
-- last_seen: "2026-03-18"
-- occurrences: 3+
+- root_cause: "PyTorch's per-sample gradient computation (torch.nn.utils.call_for_per_sample_grads) uses THRESHOLD=32 in conv_utils.py to switch between group-based algorithm and unfold-based algorithm. When batch_size >= 32, unfold path triggers CANN's aclnnIm2col optimization which changes floating-point operation order compared to group-based algorithm, causing numerical differences between per-sample gradients and cumulative individual backward passes"
+- solution: "Workaround: use batch_size < 32 for per-sample gradient tests on NPU, or increase tolerance (atol=1e-2, rtol=1e-3). Long-term: address CANN aclnnIm2col numerical precision in optimization path, or use group-based algorithm unconditionally for per-sample gradients"
+- last_seen: "2026-03-11"
+- occurrences: 1
 
-### Scalar-to-Tensor Device Mismatch
-- failure_info: "ERR01002, Expected all tensors to be on the same device, scalar tensor on CPU, NPU tensor expected"
-- observed_at: "N/A - seed entry"
-- failure_type: "cann"
-- root_cause: "Python scalar or CPU scalar tensor passed to op-plugin function that expects NPU tensor. Op-plugin converts scalar via self_tensor_to_device() but some paths miss this."
-- solution: "Explicitly move scalar to NPU: `scalar_tensor.to('npu')`, or extract as Python scalar with `.item()` before passing"
-- last_seen: "2026-03-18"
-- occurrences: 5+
+### Test Framework CUDA Dependency
+- failure_info: "TypeError: '>=' not supported between 'NoneType' and 'tuple', SM53OrLater, torch.cuda.get_device_capability"
+- observed_at: "test_linalg.py:5731 (class TestLinalg test definition)"
+- failure_type: "scripts"
+- root_cause: "Test imports torch.testing._internal.common_cuda which contains CUDA-specific lazy evaluation (SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))) that fails when running on NPU because get_device_capability() returns None"
+- solution: "Skip common_cuda import for NPU tests, or add None check: torch.cuda.is_available() and torch.cuda.get_device_capability() is not None and ..."
+- last_seen: "2026-03-12"
+- occurrences: 1
 
-### AI Core Overflow
-- failure_info: "207003, ACL_ERROR_RT_AICORE_OVER_FLOW, AI Core overflow, numerical overflow"
-- observed_at: "N/A - seed entry"
-- failure_type: "cann"
-- root_cause: "Operator computation overflows AI Core register width, typically with fp16 inputs on large tensors or extreme values"
-- solution: "Cast inputs to fp32 before computation, or use loss scaling. Check operator dump data for overflow location."
-- last_seen: "2026-03-18"
-- occurrences: 3
+### _convert_weight_to_int4pack Not Implemented for NPU
+- failure_info: "Could not run 'aten::_convert_weight_to_int4pack' with arguments from 'CPU' backend, PrivateUse1 dispatcher not registered, int4 quantization, weight packing"
+- observed_at: "test_linalg.py test__int4_mm, test_mps.py test__int4_mm"
+- failure_type: "framework|cann"
+- root_cause: "Two issues: (1) Framework: torch_npu doesn't register aten::_convert_weight_to_int4pack dispatcher entry, only provides torch_npu.npu_convert_weight_to_int4pack in separate namespace. (2) CANN: No ACLNN kernel for weight packing equivalent to CUDA's matrix_to_m16n8k16_Bint4_layout; packing is done on CPU via npu_convert_weight_to_int4pack. Also: Input format differs (CUDA: uint8[N,K] with pre-packed int4; NPU: int32[K,N] unpacked), value range differs (CUDA: unsigned [0,15]; NPU: signed [-8,7])"
+- solution: "Short-term: Modify test to use NPU-specific flow with torch_npu.npu_convert_weight_to_int4pack and signed int4 quantization. Long-term: Add NPU dispatcher entry in native_functions.yaml and implement _convert_weight_to_int4pack_npu with format conversion"
+- last_seen: "2026-03-12"
+- occurrences: 1
 
-### Stream Not in Current Context
-- failure_info: "107003, ACL_ERROR_RT_STREAM_CONTEXT, stream not in current context"
-- observed_at: "N/A - seed entry"
-- failure_type: "framework"
-- root_cause: "NPU stream was created in one context but used in another, typically caused by multi-device operations or improper device switching"
-- solution: "Ensure torch.npu.set_device() is called before stream operations. Check that tensors and streams are on the same device."
-- last_seen: "2026-03-18"
+### AMP Custom Fwd Deprecation Warning Not Implemented on NPU
+- failure_info: "IndexError, list index out of range, custom_fwd deprecation warning, torch.cuda.amp.custom_fwd is deprecated"
+- observed_at: "test_cuda.py:test_autocast_custom_deprecated_warning"
+- failure_type: "scripts"
+- root_cause: "Test checks for CUDA-specific deprecation warning from torch.cuda.amp.custom_fwd. When adapted to NPU via adapt_testcases_to_npu.py (which converts torch.cuda.amp → torch.npu.amp), the test uses torch_npu.npu.amp.custom_fwd which does NOT emit a deprecation warning, causing the warning list to be empty and w[0] to raise IndexError"
+- solution: "Add test_cuda.py::TestCudaAutocast::test_autocast_custom_deprecated_warning to disabled tests list (.pytorch-disabled-tests.json) as it tests CUDA-specific behavior not applicable to NPU's amp implementation. NPU's custom_fwd in torch_npu/npu/amp/autocast_mode.py doesn't have deprecation mechanism for backward compatibility reasons"
+- last_seen: "2026-03-12"
+- occurrences: 1
+
+### CUDA Low-Level Test Framework APIs Missing on NPU
+- failure_info: "AttributeError, module 'torch._C' has no attribute '(_cuda_setStream|_cuda_setDevice|_cuda_sleep|_cuda_attach_out_of_memory_observer)', CudaNonDefaultStream, device_sleep, OOM observer"
+- observed_at: "test_cuda.py::TestCudaMallocAsync::test_notifies_oom, test_cuda.py::TestCuda (various tests)"
+- failure_type: "scripts|framework"
+- root_cause: "PyTorch test framework uses torch._C._cuda_* low-level APIs (_cuda_setStream, _cuda_setDevice, _cuda_sleep, _cuda_attach_out_of_memory_observer, etc.) which don't exist on NPU. These are CUDA C++ extension APIs. NPU has equivalents (_npu_setStream, _npu_setDevice, _npu_attach_out_of_memory_observer) but _cuda_sleep has no CANN equivalent (no device-side sleep kernel like CUDA's cudaSleep). Tests using CudaNonDefaultStream, device_sleep() or OOM observer attach trigger these missing APIs."
+- solution: "For script code: Change torch._C._cuda_attach_out_of_memory_observer(cb) to torch_npu._C._npu_attach_out_of_memory_observer(cb). For the case that the call chains of torch_npu and cuda are compatible and kernel is ready, the torch_npu framework may need revise. Otherwise, ask CANN team for kernel implementation help."
+- note: "CANN lacks device-side sleep kernel equivalent to CUDA's cudaSleep(). This is a feature gap, not a CANN error/bug. The no-op is sufficient since _sleep is only used for RPC/profiling timing delays."
+- last_seen: "2026-03-16"
 - occurrences: 2
 
-### HCCL Distributed Init Failure
-- failure_info: "ERR02xxx, HCCL init failed, init_process_group failed, EI0006, socket build timeout, EJ0001"
-- observed_at: "N/A - seed entry"
-- failure_type: "cann"
-- root_cause: "HCCL communication initialization failed due to network issues, incorrect rank table, or firewall blocking ports"
-- solution: "1. Check network connectivity between nodes 2. Verify HCCL rank table configuration 3. Check firewall rules for HCCL ports 4. Set HCCL_CONNECT_TIMEOUT=300 for slow networks"
-- last_seen: "2026-03-18"
-- occurrences: 4
-
-### DO_COMPATIBILITY Fallback Precision Difference
-- failure_info: "numerical mismatch, precision difference, aclnn unavailable, DO_COMPATIBILITY fallback to acl_op"
-- observed_at: "N/A - seed entry"
-- failure_type: "cann"
-- root_cause: "aclnn kernel not available on current CANN version, DO_COMPATIBILITY silently falls back to acl_op (OpCommand) path which may have different precision or behavior"
-- solution: "Upgrade CANN to version that supports the aclnn kernel. Check op_plugin_functions.yaml for version requirements. Or adjust test tolerances if precision difference is acceptable."
-- last_seen: "2026-03-18"
-- occurrences: 2
-
-### Format Conversion Error (ND/NZ/NCHW)
-- failure_info: "format mismatch, FormatHelper, IsOpInputBaseFormat, transdata failed, ACL format error"
-- observed_at: "N/A - seed entry"
-- failure_type: "cann"
-- root_cause: "Tensor stored in non-base format (e.g., NZ for matmul optimization) but operator requires base format (ND/NCHW). Format conversion (TransData) failed or was not triggered."
-- solution: "Use npu_format_cast to convert to base format before operation, or use apply_tensor_without_format for output allocation"
-- last_seen: "2026-03-18"
-- occurrences: 3
-
-### Operator Not Registered for privateuse1
-- failure_info: "NotImplementedError, Could not run, no kernel found, aten::xxx, privateuse1"
-- observed_at: "N/A - seed entry"
+### functionalize_rng_ops CUDARngStateHelper Missing NPU Support
+- failure_info: "IndexError, tuple index out of range, functionalize_rng_ops, CUDARngStateHelper, default_generators"
+- observed_at: "test_functionalization_of_rng_ops.py::NegativeTest::test_on_cpu"
 - failure_type: "framework"
-- root_cause: "Operator not registered in npu_native_functions.yaml or not implemented in op-plugin for current PyTorch version"
-- solution: "1. Check npu_native_functions.yaml for operator registration 2. Check op_plugin_functions.yaml for version support 3. Use CPU fallback: tensor.cpu() → op → result.npu() 4. File feature request if operator should be supported"
-- last_seen: "2026-03-18"
-- occurrences: 10+
-
-## Observed Failures
-
-(Entries added from actual diagnosis sessions — include specific test case names and verified solutions)
+- root_cause: "PyTorch's functorch/aot_autograd uses CUDARngStateHelper.get_torch_state_as_tuple() for RNG functionalization, which calls torch.cuda._get_rng_state_offset() that accesses torch.cuda.default_generators[idx]. On NPU (which uses CPU-only PyTorch build), the default_generators tuple is empty, causing IndexError."
+- solution: "Added patch_cuda_rng_state_helper() to torch_npu/utils/_inductor.py that overwrites CUDARngStateHelper.get_torch_state_as_tuple() to use torch_npu.npu.initial_seed() and torch_npu.npu._get_rng_state_offset() instead of CUDA equivalents when NPU is available. Both torch._prims_common.CUDARngStateHelper and torch._prims.rng_prims.CUDARngStateHelper instances are patched."
+- last_seen: "2026-03-17"
+- occurrences: 1
 
 ## Searchable Keywords
 
-- Memory: OOM, EL0004, 200000, 207018, memory exhausted, FAIL_TO_ALLOCATE_MEMORY
-- Hardware: 107010, FORCE STOP, device task abort, ECC, link error, 507010, 507054, heartbeat
-- Distributed: HCCL, timeout, broadcast, all_reduce, 107020, EI0002, EI0006, EJ0001, init_process_group
-- Framework: 107002, 107003, context empty, stream not in context, ERR00xxx, ERR01xxx, ERR02xxx
-- Test: device detection, device mismatch, index_fill, bfloat16, DISABLED_TESTS_FILE, privateuse1
-- Operator: custom ops, not supported, fallback, expanded_weights, 561003, 561112, kernel not found, NotImplementedError
-- Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN, version mismatch, ImportError
-- Precision: numerical mismatch, overflow, 207003, DO_COMPATIBILITY, tolerance, per_sample_grad
-- Format: format mismatch, FormatHelper, ND, NZ, NCHW, transdata
-- Scalar: scalar tensor, device mismatch, self_tensor_to_device, item()
+- Memory: OOM, EL0004, 200000, 207018, memory exhausted, OOM observer, OutOfMemoryError, RuntimeError
+- Hardware: 107010, FORCE STOP, device task abort, ECC, link error
+- Distributed: HCCL, timeout, broadcast, all_reduce, 107020
+- Framework: 107002, context empty, stream not in context, dispatcher not registered, PrivateUse1, low-level API, CUDA API, _cuda_*, _npu_*, functionalize_rng_ops, default_generators
+- Test: device detection, device mismatch, index_fill, bfloat16, CUDA dependency, deprecation warning, CudaNonDefaultStream, device_sleep, OOM notifies_oom
+- Operator: custom ops, not supported, fallback, expanded_weights, aclnnIm2col, GroupNorm, int4pack, weight quantization
+- Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN
+- Accuracy: per_sample_grad, batch_threshold, numerical bias, gradient accuracy
 
 ## Adding New Failures
 
