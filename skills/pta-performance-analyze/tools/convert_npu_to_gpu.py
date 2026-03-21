@@ -75,15 +75,15 @@ def default_output_path(input_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='将 NPU 显存测试脚本转换为 GPU 版本',
+        description='Convert NPU memory test script to GPU version',
     )
-    parser.add_argument('input', help='NPU 测试脚本路径')
-    parser.add_argument('-o', '--output', help='输出 GPU 脚本路径 (默认: <input>_gpu.py)')
-    parser.add_argument('--diff', action='store_true', help='仅显示会应用的转换规则，不写文件')
+    parser.add_argument('input', help='NPU test script path')
+    parser.add_argument('-o', '--output', help='Output GPU script path (default: <input>_gpu.py)')
+    parser.add_argument('--diff', action='store_true', help='Only show transformations that would be applied, do not write file')
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
-        print(f'错误: 文件不存在: {args.input}', file=sys.stderr)
+        print(f'Error: file not found: {args.input}', file=sys.stderr)
         sys.exit(1)
 
     with open(args.input, 'r', encoding='utf-8') as f:
@@ -92,10 +92,10 @@ def main():
     converted, applied = convert_npu_to_gpu(content)
 
     if not applied:
-        print('未检测到需要转换的 NPU 特征，请确认输入文件是 NPU 脚本。')
+        print('No NPU-specific patterns detected; please ensure the input file is an NPU script.')
         return
 
-    print(f'应用了 {len(applied)} 条转换规则:')
+    print(f'Applied {len(applied)} transformation rule(s):')
     for rule in applied:
         print(f'  * {rule}')
 
@@ -107,7 +107,7 @@ def main():
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(converted)
 
-    print(f'已生成 GPU 脚本: {output_path}')
+    print(f'GPU script written: {output_path}')
 
 
 if __name__ == '__main__':

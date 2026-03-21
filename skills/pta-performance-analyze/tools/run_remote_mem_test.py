@@ -119,16 +119,31 @@ def extract_key_code_lines(script_path, api_name):
 # ─── SSH helpers (SSH_ASKPASS, same as remote_deploy_build.py) ─────────────
 
 def _make_askpass(password: str) -> str:
-    """Create a .bat helper that echoes the password (Windows SSH_ASKPASS)."""
-    bat = os.path.join(tempfile.gettempdir(), "mem_test_askpass.bat")
-    # Use an environment variable to avoid special characters in the password
-    # being interpreted by cmd (e.g. &, |, >). We escape % to avoid expansion.
-    safe = password.replace("%", "%%")
+    """Create a .bat helper that echoes the password (Windows SSH_ASKPASS).
+
+    Writes the raw password to a companion .txt file and uses ``type`` to
+    output it, so cmd.exe never interprets special characters (&, |, >, etc.)
+    in the password.  Each thread gets a unique pair of files to avoid races.
+    """
+    tid = threading.current_thread().ident
+    pw_file = os.path.join(tempfile.gettempdir(), f"mem_test_pw_{tid}.txt")
+    bat = os.path.join(tempfile.gettempdir(), f"mem_test_askpass_{tid}.bat")
+    with open(pw_file, "w", newline="") as f:
+        f.write(password)
     with open(bat, "w") as f:
         f.write("@echo off\n")
-        f.write(f"set P={safe}\n")
-        f.write("echo %P%\n")
+        f.write(f'type "{pw_file}"\n')
     return bat
+
+
+def _cleanup_askpass(bat_path: str):
+    """Remove the askpass .bat and its companion password .txt file."""
+    pw_path = bat_path.replace("_askpass_", "_pw_").replace(".bat", ".txt")
+    for p in (bat_path, pw_path):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
 def _ssh_env(askpass_bat: str) -> dict:
@@ -184,25 +199,25 @@ def run_ascend_test(cfg, npu_script, api_name, out_dir, results):
     env = _ssh_env(askpass)
 
     try:
-        log(T, f"连接 {host} ...")
+        log(T, f"Connecting to {host} ...")
 
-        # 创建工作目录
+        # Create working directory
         ssh_run(target, f"mkdir -p {wdir}", env)
-        log(T, f"远程工作目录: {wdir}")
+        log(T, f"Remote work dir: {wdir}")
 
-        # 上传文件
+        # Upload files
         sn = os.path.basename(npu_script)
         ok, err = scp_upload(target, npu_script, f"{wdir}/{sn}", env)
         if not ok:
-            log(T, f"上传 {sn} 失败: {err}")
+            log(T, f"Upload {sn} failed: {err}")
             results["ascend_error"] = f"SCP upload failed: {err}"
             return
 
         fn = FILTER_NPU_SCRIPT.name
         scp_upload(target, str(FILTER_NPU_SCRIPT), f"{wdir}/{fn}", env)
-        log(T, f"已上传: {sn}, {fn}")
+        log(T, f"Uploaded: {sn}, {fn}")
 
-        # 构建远程执行命令
+        # Build remote command
         remote_cmd = (
             f"cd {wdir} && "
             f"{{ [ -f {base}/env.sh ] && source {base}/env.sh; true; }} && "
@@ -216,7 +231,7 @@ def run_ascend_test(cfg, npu_script, api_name, out_dir, results):
             f"cat {wdir}/_stdout.txt"
         )
 
-        log(T, "执行 NPU 测试脚本 ...")
+        log(T, "Running NPU test script ...")
         out, err, _ = ssh_run(target, remote_cmd, env, timeout=600)
         lines = out.strip().split("\n")
 
@@ -238,18 +253,18 @@ def run_ascend_test(cfg, npu_script, api_name, out_dir, results):
         log(T, f"PID={pid}, exit_code={exit_code}")
 
         if exit_code != 0:
-            log(T, f"执行失败!\nstdout:\n{out[-1000:]}\nstderr:\n{err[-500:]}")
+            log(T, f"Execution failed!\nstdout:\n{out[-1000:]}\nstderr:\n{err[-500:]}")
             results["ascend_error"] = f"exit_code={exit_code}"
             return
 
         if json_result:
             results["ascend"] = json_result
-            log(T, f"显存结果: {json.dumps(json_result, ensure_ascii=False)}")
+            log(T, f"Memory result: {json.dumps(json_result, ensure_ascii=False)}")
         else:
-            log(T, f"警告: 未捕获到 JSON 输出\n{out}")
+            log(T, f"Warning: no JSON output captured\n{out}")
 
-        # ── 查找 plog 日志 ──
-        log(T, "查找 plog 日志 ...")
+        # Find plog log
+        log(T, "Locating plog log ...")
         if pid:
             find_cmd = f"find {wdir} -name '*plog*{pid}*' -type f 2>/dev/null"
         else:
@@ -272,7 +287,7 @@ def run_ascend_test(cfg, npu_script, api_name, out_dir, results):
                     )
 
         if plog_files:
-            # 选最大的 plog 文件
+            # Pick largest plog file
             best, best_sz = plog_files[0], 0
             for pf in plog_files:
                 sz_out, _, _ = ssh_run(target, f"wc -c < '{pf}' 2>/dev/null", env)
@@ -299,23 +314,20 @@ def run_ascend_test(cfg, npu_script, api_name, out_dir, results):
                 ok2, err2 = scp_download(target, remote_filt, local_filt, env)
                 if ok2:
                     results["ascend_plog"] = local_filt
-                    log(T, f"过滤后 plog 已下载: {local_filt}")
+                    log(T, f"Filtered plog downloaded: {local_filt}")
                 else:
-                    log(T, f"下载 plog 失败: {err2}")
+                    log(T, f"Download plog failed: {err2}")
             else:
-                log(T, f"filter 执行失败:\n{fo}")
+                log(T, f"Filter execution failed:\n{fo}")
         else:
-            log(T, "未找到 plog 文件")
+            log(T, "No plog file found")
 
     except Exception as e:
-        log(T, f"异常: {e}")
+        log(T, f"Exception: {e}")
         results["ascend_error"] = str(e)
     finally:
-        try:
-            os.remove(askpass)
-        except OSError:
-            pass
-        log(T, "完成")
+        _cleanup_askpass(askpass)
+        log(T, "Done")
 
 
 # ─── GPU test ──────────────────────────────────────────────────────────────
@@ -331,17 +343,17 @@ def run_gpu_test(cfg, gpu_script, api_name, out_dir, results):
     env = _ssh_env(askpass)
 
     try:
-        log(T, f"连接 {host} ...")
+        log(T, f"Connecting to {host} ...")
         ssh_run(target, f"mkdir -p {wdir}", env)
-        log(T, f"远程工作目录: {wdir}")
+        log(T, f"Remote work dir: {wdir}")
 
         sn = os.path.basename(gpu_script)
         ok, err = scp_upload(target, gpu_script, f"{wdir}/{sn}", env)
         if not ok:
-            log(T, f"上传 {sn} 失败: {err}")
+            log(T, f"Upload {sn} failed: {err}")
             results["gpu_error"] = f"SCP upload failed: {err}"
             return
-        log(T, f"已上传: {sn}")
+        log(T, f"Uploaded: {sn}")
 
         remote_cmd = (
             f"cd {wdir} && "
@@ -349,7 +361,7 @@ def run_gpu_test(cfg, gpu_script, api_name, out_dir, results):
             f"python {sn} 2>&1; echo EXIT_CODE=$?"
         )
 
-        log(T, "执行 GPU 测试脚本 ...")
+        log(T, "Running GPU test script ...")
         out, err, _ = ssh_run(target, remote_cmd, env, timeout=600)
         lines = out.strip().split("\n")
 
@@ -368,25 +380,22 @@ def run_gpu_test(cfg, gpu_script, api_name, out_dir, results):
         log(T, f"exit_code={exit_code}")
 
         if exit_code != 0:
-            log(T, f"执行失败!\nstdout:\n{out[-800:]}\nstderr:\n{err[-500:]}")
+            log(T, f"Execution failed!\nstdout:\n{out[-800:]}\nstderr:\n{err[-500:]}")
             results["gpu_error"] = f"exit_code={exit_code}"
             return
 
         if json_result:
             results["gpu"] = json_result
-            log(T, f"显存结果: {json.dumps(json_result, ensure_ascii=False)}")
+            log(T, f"Memory result: {json.dumps(json_result, ensure_ascii=False)}")
         else:
-            log(T, f"警告: 未捕获到 JSON 输出\n{out}")
+            log(T, f"Warning: no JSON output captured\n{out}")
 
     except Exception as e:
-        log(T, f"异常: {e}")
+        log(T, f"Exception: {e}")
         results["gpu_error"] = str(e)
     finally:
-        try:
-            os.remove(askpass)
-        except OSError:
-            pass
-        log(T, "完成")
+        _cleanup_askpass(askpass)
+        log(T, "Done")
 
 
 # ─── results ───────────────────────────────────────────────────────────────
@@ -462,55 +471,55 @@ def write_results(results, path, key_code=None, script_path=None, line_range=Non
     print(f"\n{'=' * 60}")
     print(content)
     print(f"{'=' * 60}")
-    print(f"结果已保存: {path}")
+    print(f"Results saved: {path}")
 
 
 # ─── main ──────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser(
-        description="远程显存测试工具 – NPU vs GPU",
+        description="Remote memory test tool – NPU vs GPU",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
-            示例:
+            Examples:
               python run_remote_mem_test.py npu_test.py gpu_test.py
               python run_remote_mem_test.py npu_test.py gpu_test.py --api-name torch.nanmean
               python run_remote_mem_test.py npu_test.py gpu_test.py --skip-gpu
               python run_remote_mem_test.py npu.py gpu.py --skip-gpu --gpu-json '{"target_api":"torch.x","total_driver_GB":1.0,"gpu_reserved_GB":1.0,"gpu_activated_GB":1.0}'
         """),
     )
-    ap.add_argument("npu_script", help="NPU 测试脚本路径")
-    ap.add_argument("gpu_script", help="GPU 测试脚本路径")
-    ap.add_argument("--api-name", help="算子 API 名 (默认从脚本中提取 TARGET_API)")
+    ap.add_argument("npu_script", help="NPU test script path")
+    ap.add_argument("gpu_script", help="GPU test script path")
+    ap.add_argument("--api-name", help="API name (default: extract TARGET_API from script)")
     ap.add_argument(
         "--servers",
         default=str(SERVERS_JSON),
-        help=f"servers.json 路径 (默认: {SERVERS_JSON})",
+        help=f"Path to servers.json (default: {SERVERS_JSON})",
     )
-    ap.add_argument("--output-dir", help="本地输出目录 (默认: NPU 脚本同目录)")
-    ap.add_argument("--ascend-key", default="910b", help="Ascend 服务器 key (默认: 910b)")
-    ap.add_argument("--gpu-key", default="gpu", help="GPU 服务器 key (默认: gpu)")
-    ap.add_argument("--skip-ascend", action="store_true", help="跳过 Ascend 测试")
-    ap.add_argument("--skip-gpu", action="store_true", help="跳过 GPU 测试")
+    ap.add_argument("--output-dir", help="Local output directory (default: same as NPU script)")
+    ap.add_argument("--ascend-key", default="910b", help="Ascend server key (default: 910b)")
+    ap.add_argument("--gpu-key", default="gpu", help="GPU server key (default: gpu)")
+    ap.add_argument("--skip-ascend", action="store_true", help="Skip Ascend test")
+    ap.add_argument("--skip-gpu", action="store_true", help="Skip GPU test")
     ap.add_argument(
         "--gpu-json",
-        help="手动提供 GPU 结果 JSON（跳过 GPU 远程测试时使用）",
+        help="Provide GPU result JSON manually (when skipping GPU remote test)",
     )
     args = ap.parse_args()
 
     if not os.path.isfile(args.npu_script):
-        sys.exit(f"错误: 文件不存在 {args.npu_script}")
+        sys.exit(f"Error: file not found {args.npu_script}")
     if not args.skip_gpu and not os.path.isfile(args.gpu_script):
-        sys.exit(f"错误: 文件不存在 {args.gpu_script}")
+        sys.exit(f"Error: file not found {args.gpu_script}")
     if not os.path.isfile(args.servers):
-        sys.exit(f"错误: servers.json 不存在 {args.servers}")
+        sys.exit(f"Error: servers.json not found {args.servers}")
     if not FILTER_NPU_SCRIPT.is_file():
-        sys.exit(f"错误: filter 脚本不存在 {FILTER_NPU_SCRIPT}")
+        sys.exit(f"Error: filter script not found {FILTER_NPU_SCRIPT}")
 
     api_name = args.api_name or extract_api_name(args.npu_script)
     if not api_name:
-        sys.exit("错误: 无法提取 API 名，请用 --api-name 指定")
-    print(f"目标 API: {api_name}")
+        sys.exit("Error: could not extract API name; use --api-name to specify")
+    print(f"Target API: {api_name}")
 
     servers = load_servers(args.servers)
     out_dir = args.output_dir or os.path.dirname(os.path.abspath(args.npu_script))
@@ -521,7 +530,7 @@ def main():
 
     if not args.skip_ascend:
         if args.ascend_key not in servers:
-            sys.exit(f"错误: 未找到服务器 '{args.ascend_key}'")
+            sys.exit(f"Error: server '{args.ascend_key}' not found")
         threads.append(
             threading.Thread(
                 target=run_ascend_test,
@@ -532,7 +541,7 @@ def main():
 
     if not args.skip_gpu:
         if args.gpu_key not in servers:
-            sys.exit(f"错误: 未找到服务器 '{args.gpu_key}'")
+            sys.exit(f"Error: server '{args.gpu_key}' not found")
         threads.append(
             threading.Thread(
                 target=run_gpu_test,
@@ -547,12 +556,12 @@ def main():
                 gpu_json_str = f.read().strip()
         try:
             results["gpu"] = json.loads(gpu_json_str)
-            print(f"使用手动提供的 GPU 结果: {gpu_json_str}")
+            print(f"Using manually provided GPU result: {gpu_json_str}")
         except json.JSONDecodeError as e:
-            sys.exit(f"错误: --gpu-json 格式不正确: {e}")
+            sys.exit(f"Error: invalid --gpu-json format: {e}")
 
     if not threads and "gpu" not in results:
-        sys.exit("错误: 没有可运行的测试")
+        sys.exit("Error: no test to run")
 
     t0 = time.time()
     for t in threads:
@@ -560,9 +569,9 @@ def main():
     for t in threads:
         t.join()
     elapsed = time.time() - t0
-    print(f"\n总耗时: {elapsed:.1f}s")
+    print(f"\nTotal time: {elapsed:.1f}s")
 
-    result_file = os.path.join(out_dir, "mem_results.md")
+    result_file = os.path.join(out_dir, f"mem_results_{api_name.replace('.', '_')}.md")
     
     key_code, line_start, line_end = extract_key_code_lines(args.npu_script, api_name)
     if not key_code and not args.skip_gpu and os.path.isfile(args.gpu_script):
