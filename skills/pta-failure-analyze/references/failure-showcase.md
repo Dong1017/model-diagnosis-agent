@@ -185,13 +185,23 @@ Historical torch_npu failures and their solutions. Format:
 - last_seen: "2026-03-17"
 - occurrences: 1
 
+### filter_desired_device_types Returns Empty List for PrivateUse1
+- failure_info: "RuntimeError not raised, assertRaisesRegex, filter_desired_device_types returns empty list, PrivateUse1 device_type mismatch, instantiate_device_type_tests only_for filter fails"
+- observed_at: "common_device_type.py:filter_desired_device_types, triggered from test_testing.py:test_multiple_handling_of_same_param_error and test_dtypes_composition_invalid"
+- failure_type: "framework"
+- root_cause: "filter_desired_device_types (common_device_type.py) has two bugs when PrivateUse1 is active: (1) Bare-string iteration — when only_for/except_for is a bare string (e.g. 'npu:0') instead of a list, the list comprehension `for x in only_for` iterates over individual characters, producing ['n','p','u',':','0'] where no character equals the backend name 'npu', so no conversion to 'privateuse1' occurs; (2) Asymmetric normalization — the function normalizes only the input side (only_for/except_for) from backend_name to 'privateuse1', but does NOT normalize x.device_type in the filter lambda. After PrivateUse1TestBase.setUpClass() (line 707) mutates the base class device_type from 'privateuse1' to 'npu' (via `base.setUpClass()` called in _setUpClass at line 946), the normalized input 'privateuse1' can never match the mutated x.device_type 'npu'. These two bugs together cause filter_desired_device_types to return an empty list for any PrivateUse1-related only_for value, which means instantiate_device_type_tests skips all test instantiation and no RuntimeError is ever raised for redundant parameter checks."
+- solution: "Fix filter_desired_device_types in common_device_type.py: (1) Guard against bare strings with `if isinstance(only_for, str): only_for = [only_for]`; (2) Introduce a _normalize_device_type helper that strips device index ('npu:0' → 'npu') and maps backend_name → 'privateuse1'; (3) Apply _normalize_device_type to BOTH sides — the input lists AND x.device_type in the filter lambdas — so the comparison is always between consistently normalized values."
+- note: "The setUpClass mutation is triggered by _setUpClass (line 946) which calls `base.setUpClass()` directly on PrivateUse1TestBase rather than through the derived class, permanently changing the global base class device_type attribute. This affects any code that later reads device_type_test_bases entries."
+- last_seen: "2026-03-25"
+- occurrences: 1
+
 ## Searchable Keywords
 
 - Memory: OOM, EL0004, 200000, 207018, memory exhausted, OOM observer, OutOfMemoryError, RuntimeError
 - Hardware: 107010, FORCE STOP, device task abort, ECC, link error
 - Distributed: HCCL, timeout, broadcast, all_reduce, 107020
-- Framework: 107002, context empty, stream not in context, dispatcher not registered, PrivateUse1, low-level API, CUDA API, _cuda_*, _npu_*, functionalize_rng_ops, default_generators
-- Test: device detection, device mismatch, index_fill, bfloat16, CUDA dependency, deprecation warning, CudaNonDefaultStream, device_sleep, OOM notifies_oom
+- Framework: 107002, context empty, stream not in context, dispatcher not registered, PrivateUse1, low-level API, CUDA API, _cuda_*, _npu_*, functionalize_rng_ops, default_generators, filter_desired_device_types, setUpClass device_type mutation, asymmetric normalization
+- Test: device detection, device mismatch, index_fill, bfloat16, CUDA dependency, deprecation warning, CudaNonDefaultStream, device_sleep, OOM notifies_oom, assertRaisesRegex RuntimeError not raised, instantiate_device_type_tests only_for, parametrize handled multiple times
 - Operator: custom ops, not supported, fallback, expanded_weights, aclnnIm2col, GroupNorm, int4pack, weight quantization
 - Environment: libhccl.so, libascendcl.so, ASCEND_OPP_PATH, CANN
 - Accuracy: per_sample_grad, batch_threshold, numerical bias, gradient accuracy

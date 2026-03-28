@@ -1,11 +1,12 @@
-# pta-failure-analyze Eval Tools
+# pta-failure-analyze Tools
 
-Tools for running, grading, and aggregating regression evals for the `pta-failure-analyze` skill.
+Tools for regression evaluation and remote deploy & verify for the `pta-failure-analyze` skill.
 
 ## Prerequisites
 
 - Python 3.10+
-- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
+- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) — for eval tools
+- SSH client — for remote deploy & verify
 
 ## Quick Start
 
@@ -110,6 +111,103 @@ workspace/
                 └── outputs/
                     └── eval_metadata.json
 ```
+
+## Remote Deploy & Verify
+
+`remote_deploy_verify.py` helps sync local code changes to a remote Ascend server, compile, and run verification tests. It is optionally triggered by the agent during Stage 4 (Validate and Close). See [remote-deploy-verify reference](../references/remote-deploy-verify.md) for the full workflow.
+
+All subcommands output structured JSON to stdout for LLM consumption. The agent synthesizes reports from JSON outputs directly — no dedicated report subcommand needed.
+
+### Quick Start
+
+```bash
+# 1. Analyze local changes
+python tools/remote_deploy_verify.py collect --local-root /path/to/torch_npu
+
+# 2. Preflight check (requires deploy_context.json)
+python tools/remote_deploy_verify.py preflight --config deploy_context.json
+
+# 3. Sync with dry-run preview, then execute
+python tools/remote_deploy_verify.py sync --config deploy_context.json --dry-run
+python tools/remote_deploy_verify.py sync --config deploy_context.json
+
+# 4. Build remotely
+python tools/remote_deploy_verify.py build --config deploy_context.json --mode incremental
+
+# 5. Run verification
+python tools/remote_deploy_verify.py run --config deploy_context.json
+
+# 6. Rollback if needed
+python tools/remote_deploy_verify.py rollback --config deploy_context.json
+```
+
+### `remote_deploy_verify.py` Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `collect` | Analyze local git changes, classify files (cpp/config/test/python), recommend build mode |
+| `preflight` | Single-SSH check: connectivity, remote path, Python, CANN, cmake cache, Docker |
+| `sync` | Sync changed files to remote via rsync (supports `--dry-run`); auto-stashes remote state |
+| `build` | Run remote compilation (`--mode`: incremental / full / develop / custom / skip) |
+| `run` | Execute remote verification command, return exit code + output tail |
+| `rollback` | Revert remote changes via `git checkout` + `git stash pop` |
+
+### `deploy_context.json` Schema
+
+```json
+{
+  "remote": { "host": "10.0.1.100", "user": "dev", "port": 22 },
+  "paths": {
+    "local_root": "/home/user/torch_npu",
+    "remote_root": "/home/dev/torch_npu"
+  },
+  "exec_context": {
+    "type": "bare | docker",
+    "docker_container": null,
+    "env_setup": "source /usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "host_mount_path": null
+  },
+  "build": {
+    "python_version": "3.9",
+    "command": null
+  },
+  "verify": {
+    "command": "python -m pytest test/test_xxx.py::test_func -xvs",
+    "timeout": 600,
+    "env_vars": { "ASCEND_LAUNCH_BLOCKING": "1" }
+  }
+}
+```
+
+### Execution Context Types
+
+| Type | When to use | How it works |
+|------|-------------|-------------|
+| `bare` | Direct SSH to physical/virtual machine | `ssh → env_setup → cd remote_root → cmd` |
+| `docker` | Build environment is in a Docker container | `ssh → docker exec container bash -c 'env_setup && cd && cmd'` |
+
+### Build Modes
+
+| Mode | Command | When |
+|------|---------|------|
+| `skip` | _(none)_ | Only Python / test files changed |
+| `incremental` | `make -j$(nproc)` in build dir | C++ source changed, cmake cache exists |
+| `full` | `bash ci/build.sh --python=X.Y` | Config changed, no cmake cache, or first build |
+| `develop` | `python setup.py develop` | Quick iterative development |
+| `custom` | `build.command` from config | Special build requirements |
+
+### File Classification
+
+The `collect` subcommand classifies changed files into 4 types:
+
+| Type | Matches | Build recommendation |
+|------|---------|---------------------|
+| `cpp` | `.cpp`, `.h`, `.hpp`, `.cc`, `.cxx` | incremental |
+| `config` | `config/`, `CMakeLists.txt`, `setup.py`, `codegen/`, `gencode.sh`, `generate_code.sh` | full |
+| `test` | `test/` prefix | skip |
+| `python` | Everything else | skip |
+
+---
 
 ## Eval Data
 
